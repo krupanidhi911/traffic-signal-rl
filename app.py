@@ -1,135 +1,140 @@
-"""
-app.py — FastAPI + Gradio UI for Traffic Signal Controller
-"""
-
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-import uvicorn
-
 import gradio as gr
-import torch
 
-from traffic_env import TrafficSignalEnv, TrafficAction, TrafficObservation
-from agent import DQNAgent, obs_to_tensor
-
-# ─────────────────────────────────────────────────────────
-# FastAPI APP (UNCHANGED)
-# ─────────────────────────────────────────────────────────
-
-app = FastAPI(
-    title       = "Smart Traffic Signal Controller",
-    description = "OpenEnv-compatible RL environment for traffic signal control.",
-    version     = "1.0.0",
-)
-
-_env = TrafficSignalEnv(seed=42)
-
-# ─────────────────────────────────────────────────────────
-# LOAD MODEL
-# ─────────────────────────────────────────────────────────
-
-agent = DQNAgent()
-agent.load("dqn_traffic.pth")
-agent.policy_net.eval()
+# ---------- STATE ---------- #
+current_obs = None
+step_count = 0
+total_reward = 0
 
 
-# ─────────────────────────────────────────────────────────
-# API ROUTES (UNCHANGED)
-# ─────────────────────────────────────────────────────────
+# ---------- HELPERS ---------- #
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "env": "SmartTrafficSignalController-v1"}
+def render_intersection(obs):
+    return f"""
+    <div style="text-align:center;">
+        <div style="color:#00ff9f;font-size:22px;">↑ NORTH</div>
+        <div style="font-size:30px;">{obs.north_queue}</div>
 
+        <div style="display:flex;justify-content:space-around;margin-top:20px;">
+            <div style="color:#ff4d4d;">
+                ← WEST<br><span style="font-size:25px;">{obs.west_queue}</span>
+            </div>
 
-@app.post("/reset")
-def reset():
-    obs = _env.reset()
-    return obs.dict()
+            <div style="font-size:30px;">🚦</div>
 
+            <div style="color:#00ff9f;">
+                EAST →<br><span style="font-size:25px;">{obs.east_queue}</span>
+            </div>
+        </div>
 
-@app.post("/step")
-def step(action: TrafficAction):
-    try:
-        obs, reward, done, info = _env.step(action)
-        return {
-            "observation": obs.dict(),
-            "reward"     : reward,
-            "done"       : done,
-            "info"       : info,
-        }
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        <div style="margin-top:20px;color:#ff4d4d;">
+            ↓ SOUTH<br><span style="font-size:25px;">{obs.south_queue}</span>
+        </div>
+    </div>
+    """
 
 
-@app.get("/state")
-def state():
-    return _env.state().dict()
+def start_episode():
+    global current_obs, step_count, total_reward
+    current_obs = _env.reset()
+    step_count = 0
+    total_reward = 0
+
+    return update_ui("Episode Started", 0)
 
 
-@app.get("/render")
-def render():
-    return {"render": _env.render()}
+def step_env(direction):
+    global current_obs, step_count, total_reward
+
+    action_map = {"North": 0, "South": 1, "East": 2, "West": 3}
+    action = TrafficAction(action=action_map[direction])
+
+    current_obs, reward, done, info = _env.step(action)
+
+    step_count += 1
+    total_reward += reward
+
+    return update_ui(f"Action: {direction}", reward)
 
 
-@app.get("/openenv.yaml", response_class=JSONResponse)
-def openenv_yaml():
-    return {
-        "name": "SmartTrafficSignalController-v1"
-    }
+def update_ui(status, reward):
+    global current_obs, step_count, total_reward
 
+    intersection_html = render_intersection(current_obs)
 
-# ─────────────────────────────────────────────────────────
-# UI FUNCTIONS
-# ─────────────────────────────────────────────────────────
+    total_queue = (
+        current_obs.north_queue +
+        current_obs.south_queue +
+        current_obs.east_queue +
+        current_obs.west_queue
+    )
 
-def ui_reset():
-    obs = _env.reset()
     return (
-        "Episode Started",
-        obs.total_waiting,
-        obs.throughput
+        status,
+        intersection_html,
+        total_queue,
+        step_count,
+        round(reward, 2),
+        round(total_reward, 2),
     )
 
 
-def ui_step():
-    obs = _env.state()
+# ---------- UI ---------- #
 
-    with torch.no_grad():
-        state = obs_to_tensor(obs).unsqueeze(0).to(agent.device)
-        action_idx = agent.policy_net(state).argmax(dim=1).item()
+with gr.Blocks(theme=gr.themes.Base(), css="""
+body {background-color:#0b0f19;}
+.card {background:#111827;padding:15px;border-radius:12px;}
+""") as demo:
 
-    action = TrafficAction(signal=action_idx)
-    obs, reward, done, info = _env.step(action)
+    gr.Markdown("## 🚦 Smart Traffic Signal RL Dashboard")
 
-    return (
-        f"Action: {action_idx}",
-        obs.total_waiting,
-        obs.throughput
-    )
+    # -------- TOP CONTROLS -------- #
+    with gr.Row():
+        start_btn = gr.Button("▶ Start Episode", variant="primary")
+        auto_btn  = gr.Button("🤖 Auto Play", variant="secondary")
+        stop_btn  = gr.Button("⛔ Stop", variant="stop")
 
+    # -------- MAIN LAYOUT -------- #
+    with gr.Row():
 
-# ─────────────────────────────────────────────────────────
-# GRADIO UI
-# ─────────────────────────────────────────────────────────
+        # LEFT: INTERSECTION
+        with gr.Column(scale=2):
+            gr.Markdown("### 🚧 Live Intersection")
+            intersection = gr.HTML()
 
-with gr.Blocks() as demo:
-    gr.Markdown("# 🚦 Smart Traffic Signal Controller (RL)")
+            with gr.Row():
+                north_btn = gr.Button("↑ North", variant="primary")
+                south_btn = gr.Button("↓ South")
+                east_btn  = gr.Button("→ East")
+                west_btn  = gr.Button("← West")
 
-    start_btn = gr.Button("▶ Start Episode")
-    step_btn = gr.Button("⏭ Run Step")
+        # RIGHT: STATS
+        with gr.Column(scale=1):
+            gr.Markdown("### 📊 Statistics")
 
+            total_queue = gr.Number(label="🚗 Total Queue")
+            step_box    = gr.Number(label="⏱ Steps")
+            reward_box  = gr.Number(label="🎯 Last Reward")
+            total_reward_box = gr.Number(label="📈 Total Reward")
+
+    # -------- STATUS -------- #
     status = gr.Textbox(label="Status")
-    queue = gr.Number(label="Total Queue")
-    throughput = gr.Number(label="Throughput")
 
-    start_btn.click(ui_reset, outputs=[status, queue, throughput])
-    step_btn.click(ui_step, outputs=[status, queue, throughput])
+    # -------- BUTTON ACTIONS -------- #
+    start_btn.click(start_episode,
+                    outputs=[status, intersection, total_queue, step_box, reward_box, total_reward_box])
+
+    north_btn.click(lambda: step_env("North"),
+                    outputs=[status, intersection, total_queue, step_box, reward_box, total_reward_box])
+
+    south_btn.click(lambda: step_env("South"),
+                    outputs=[status, intersection, total_queue, step_box, reward_box, total_reward_box])
+
+    east_btn.click(lambda: step_env("East"),
+                   outputs=[status, intersection, total_queue, step_box, reward_box, total_reward_box])
+
+    west_btn.click(lambda: step_env("West"),
+                   outputs=[status, intersection, total_queue, step_box, reward_box, total_reward_box])
 
 
-# ─────────────────────────────────────────────────────────
-# MAIN ENTRY
-# ─────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+# Mount UI
+app = gr.mount_gradio_app(app, demo, path="/")
