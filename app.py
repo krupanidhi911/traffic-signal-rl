@@ -9,15 +9,12 @@ from agent import DQNAgent, obs_to_tensor
 app = FastAPI()
 
 # =========================
-# LOAD TRAINED MODEL
+# MODEL
 # =========================
 agent = DQNAgent()
 agent.load("dqn_traffic.pth")
 agent.policy_net.eval()
 
-# =========================
-# GLOBAL ENV
-# =========================
 env = TrafficSignalEnv(seed=42)
 
 
@@ -29,13 +26,8 @@ env = TrafficSignalEnv(seed=42)
 def reset(level: str = "easy"):
     global env
 
-    # Difficulty settings
-    if level == "easy":
-        env = TrafficSignalEnv(seed=1)
-    elif level == "medium":
-        env = TrafficSignalEnv(seed=5)
-    elif level == "hard":
-        env = TrafficSignalEnv(seed=10)
+    seed_map = {"easy": 1, "medium": 5, "hard": 10}
+    env = TrafficSignalEnv(seed=seed_map.get(level, 1))
 
     obs = env.reset()
     return obs.dict()
@@ -43,20 +35,9 @@ def reset(level: str = "easy"):
 
 @app.post("/step")
 def step(action: TrafficAction):
-    try:
-        obs, reward, done, info = env.step(action)
-        return {
-            "observation": obs.dict(),
-            "reward": reward,
-            "done": done
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    obs, reward, done, _ = env.step(action)
+    return {"observation": obs.dict(), "reward": reward, "done": done}
 
-
-# =========================
-# AI STEP (MODEL)
-# =========================
 
 @app.get("/ai-step")
 def ai_step():
@@ -69,11 +50,7 @@ def ai_step():
     action = TrafficAction(signal=action_idx)
     obs, reward, done, _ = env.step(action)
 
-    return {
-        "observation": obs.dict(),
-        "reward": reward,
-        "done": done
-    }
+    return {"observation": obs.dict(), "reward": reward, "done": done}
 
 
 # =========================
@@ -86,12 +63,12 @@ def ui():
 <!DOCTYPE html>
 <html>
 <head>
+
 <title>AI Traffic Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
 body { background:#0b0f1a; color:white; font-family:Arial; text-align:center; }
-
-h1 { margin-top:20px; }
 
 button {
     padding:10px;
@@ -101,63 +78,84 @@ button {
     cursor:pointer;
 }
 
-.start { background:#22c55e; }
-.auto { background:#3b82f6; }
-.stop { background:#ef4444; }
+.green { background:#22c55e; }
+.blue  { background:#3b82f6; }
+.red   { background:#ef4444; }
 
 .grid {
     display:grid;
     grid-template-columns:120px 120px 120px;
     gap:20px;
     justify-content:center;
-    margin-top:30px;
+    margin-top:20px;
 }
 
 .box {
-    border:2px solid #333;
     padding:20px;
     border-radius:10px;
+    transition:0.3s;
 }
 
-.stats { margin-top:20px; }
+.signal-green { background:#22c55e; }
+.signal-red { background:#1f2937; }
+
+.chart {
+    width:600px;
+    margin:20px auto;
+}
 </style>
 </head>
 
 <body>
 
-<h1>🚦 AI Traffic Signal Dashboard</h1>
+<h1>🚦 AI Traffic Dashboard</h1>
 
-<div>
-    <select id="difficulty">
-        <option value="easy">Easy</option>
-        <option value="medium">Medium</option>
-        <option value="hard">Hard</option>
-    </select>
+<select id="difficulty">
+    <option value="easy">Easy</option>
+    <option value="medium">Medium</option>
+    <option value="hard">Hard</option>
+</select>
 
-    <button class="start" onclick="reset()">Start</button>
-    <button class="auto" onclick="startAuto()">AI Auto</button>
-    <button class="stop" onclick="stopAuto()">Stop</button>
-</div>
+<br>
 
+<button class="green" onclick="reset()">▶ Reset</button>
+<button class="blue" onclick="startAuto()">🤖 Auto</button>
+<button class="red" onclick="stopAuto()">⛔ Stop</button>
+
+<br>
+
+<!-- INTERSECTION -->
 <div class="grid">
     <div></div>
-    <div class="box" id="north">NORTH</div>
+    <div id="north" class="box signal-red">N</div>
     <div></div>
 
-    <div class="box" id="west">WEST</div>
+    <div id="west" class="box signal-red">W</div>
     <div class="box">🚦</div>
-    <div class="box" id="east">EAST</div>
+    <div id="east" class="box signal-red">E</div>
 
     <div></div>
-    <div class="box" id="south">SOUTH</div>
+    <div id="south" class="box signal-red">S</div>
     <div></div>
 </div>
 
-<div class="stats">
-    <div>Total Queue: <span id="queue">0</span></div>
-    <div>Steps: <span id="steps">0</span></div>
-    <div>Total Reward: <span id="total">0</span></div>
+<!-- MANUAL -->
+<div>
+    <button onclick="manual(0)">↑</button>
+    <button onclick="manual(1)">↓</button>
+    <button onclick="manual(2)">→</button>
+    <button onclick="manual(3)">←</button>
 </div>
+
+<!-- STATS -->
+<div>
+    <p>Queue: <span id="queue">0</span></p>
+    <p>Steps: <span id="steps">0</span></p>
+    <p>Total Reward: <span id="total">0</span></p>
+</div>
+
+<!-- CHART -->
+<canvas id="chart" class="chart"></canvas>
 
 <script>
 
@@ -166,36 +164,67 @@ let total = 0;
 let running = false;
 let loop;
 
+let chart = new Chart(document.getElementById("chart"), {
+    type: "line",
+    data: {
+        labels: [],
+        datasets: [{
+            label: "Reward",
+            data: [],
+            borderColor: "#22c55e"
+        }]
+    }
+});
+
 async function reset() {
     let level = document.getElementById("difficulty").value;
-
     let res = await fetch("/reset?level=" + level, {method:"POST"});
     let data = await res.json();
 
     steps = 0;
     total = 0;
 
-    update(data, 0);
+    chart.data.labels = [];
+    chart.data.datasets[0].data = [];
+    chart.update();
+
+    update(data, 0, 0);
+}
+
+async function manual(action) {
+    let res = await fetch("/step", {
+        method:"POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({signal: action})
+    });
+
+    let data = await res.json();
+    process(data);
 }
 
 async function aiStep() {
     let res = await fetch("/ai-step");
     let data = await res.json();
+    process(data);
+}
 
+function process(data) {
     steps++;
     total += data.reward;
 
-    update(data.observation, data.reward);
+    chart.data.labels.push(steps);
+    chart.data.datasets[0].data.push(data.reward);
+    chart.update();
+
+    update(data.observation, data.reward, data.done);
 
     if (data.done) stopAuto();
 }
 
 function startAuto() {
     if (running) return;
-
     running = true;
-
-    loop = setInterval(aiStep, 400);
+    loop = setInterval(aiStep, 300);
 }
 
 function stopAuto() {
@@ -203,12 +232,21 @@ function stopAuto() {
     clearInterval(loop);
 }
 
-function update(obs, reward) {
+function update(obs, reward, done) {
 
-    document.getElementById("north").innerText = "NORTH: " + obs.north_queue;
-    document.getElementById("south").innerText = "SOUTH: " + obs.south_queue;
-    document.getElementById("east").innerText  = "EAST: " + obs.east_queue;
-    document.getElementById("west").innerText  = "WEST: " + obs.west_queue;
+    let map = ["north","south","east","west"];
+
+    map.forEach(id => {
+        document.getElementById(id).className = "box signal-red";
+    });
+
+    let active = map[obs.current_green];
+    document.getElementById(active).className = "box signal-green";
+
+    document.getElementById("north").innerText = "N: " + obs.north_queue;
+    document.getElementById("south").innerText = "S: " + obs.south_queue;
+    document.getElementById("east").innerText  = "E: " + obs.east_queue;
+    document.getElementById("west").innerText  = "W: " + obs.west_queue;
 
     let q = obs.north_queue + obs.south_queue + obs.east_queue + obs.west_queue;
 
@@ -222,6 +260,8 @@ function update(obs, reward) {
 </body>
 </html>
 """
+
+
 # =========================
 # RUN
 # =========================
