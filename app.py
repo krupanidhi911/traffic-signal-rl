@@ -101,7 +101,7 @@ def step_env(direction):
         return ("Click Start First", "", 0, 0, 0, 0)
 
     action_map = {"North": 0, "South": 1, "East": 2, "West": 3}
-    action = TrafficAction(action=action_map[direction])
+    action = TrafficAction(signal=action_map[direction])
 
     current_obs, reward, done, info = _env.step(action)
 
