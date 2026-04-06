@@ -1,7 +1,3 @@
-"""
-FINAL app.py — Vibrant AI Traffic Dashboard (Stable + Beautiful)
-"""
-
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 import uvicorn
@@ -24,7 +20,7 @@ def reset():
 def step(action: dict):
     try:
         act = TrafficAction(**action)
-        obs, reward, done, info = _env.step(act)
+        obs, reward, done, _ = _env.step(act)
         return {
             "observation": obs.dict(),
             "reward": reward,
@@ -53,247 +49,254 @@ def ui():
 <!DOCTYPE html>
 <html>
 <head>
-<title>AI Traffic Dashboard</title>
+<title>Real Traffic Simulation</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
 body {
     margin:0;
     font-family:Segoe UI;
-    background: radial-gradient(circle at top,#0f172a,#020617);
+    background:#020617;
     color:white;
+    text-align:center;
 }
 
-/* HEADER */
 h1 {
-    text-align:center;
-    margin-top:20px;
-    font-size:36px;
-    background:linear-gradient(90deg,#22c55e,#3b82f6);
-    -webkit-background-clip:text;
-    -webkit-text-fill-color:transparent;
-}
-
-/* CONTROLS */
-.controls {
-    text-align:center;
     margin:20px;
-}
-
-button, select {
-    padding:12px 18px;
-    margin:5px;
-    border:none;
-    border-radius:12px;
-    font-weight:bold;
-    cursor:pointer;
-    transition:0.3s;
-}
-
-button:hover { transform:scale(1.1); }
-
-.reset { background:#22c55e; }
-.auto { background:#3b82f6; }
-.stop { background:#ef4444; }
-
-/* MAIN GRID */
-.container {
-    display:flex;
-    justify-content:center;
-    gap:40px;
-    margin-top:30px;
+    color:#22c55e;
 }
 
 /* ROAD */
 .road {
     position:relative;
-    width:300px;
-    height:300px;
+    width:400px;
+    height:400px;
+    margin:auto;
+    background:#111;
+    border-radius:10px;
 }
 
-.lane { position:absolute; display:flex; gap:6px; }
+/* LANES */
+.lane {
+    position:absolute;
+    overflow:hidden;
+}
 
-.north { top:0; left:140px; flex-direction:column-reverse; }
-.south { bottom:0; left:140px; flex-direction:column; }
-.east  { right:0; top:140px; }
-.west  { left:0; top:140px; flex-direction:row-reverse; }
+.north { top:0; left:180px; width:40px; height:180px; }
+.south { bottom:0; left:180px; width:40px; height:180px; }
+.east  { right:0; top:180px; width:180px; height:40px; }
+.west  { left:0; top:180px; width:180px; height:40px; }
 
 /* CAR */
 .car {
-    width:12px;
-    height:12px;
-    border-radius:4px;
+    position:absolute;
+    width:10px;
+    height:10px;
     background:#22c55e;
-    box-shadow:0 0 10px #22c55e;
+    border-radius:3px;
 }
 
 /* SIGNAL */
 .signal {
     position:absolute;
-    top:130px;
-    left:130px;
-    width:45px;
-    height:45px;
-    border-radius:12px;
+    top:180px;
+    left:180px;
+    width:40px;
+    height:40px;
+    border-radius:10px;
 }
 
-.green { background:#22c55e; box-shadow:0 0 25px #22c55e; }
+.green { background:#22c55e; }
 .red { background:#ef4444; }
 
-/* PANEL */
-.panel {
-    width:260px;
-    background:rgba(255,255,255,0.05);
-    backdrop-filter:blur(12px);
-    padding:20px;
-    border-radius:15px;
+/* CONTROLS */
+button {
+    padding:10px;
+    margin:5px;
+    border:none;
+    border-radius:10px;
+    cursor:pointer;
+    font-weight:bold;
 }
 
-.panel p {
-    margin:10px 0;
-    font-size:16px;
-}
+.reset { background:#22c55e; }
+.auto { background:#3b82f6; }
+.stop { background:#ef4444; }
 
-/* CHART */
-.chart {
-    width:700px;
-    margin:40px auto;
-}
 </style>
 </head>
 
 <body>
 
-<h1>🚦 AI Traffic Dashboard</h1>
+<h1>🚦 Real Traffic Simulation</h1>
 
-<div class="controls">
-<button class="reset" onclick="reset()">▶ Reset</button>
-<button class="auto" onclick="startAuto()">🤖 Auto</button>
-<button class="stop" onclick="stopAuto()">⛔ Stop</button>
-<br>
+<button class="reset" onclick="reset()">Reset</button>
+<button class="auto" onclick="startAuto()">Auto</button>
+<button class="stop" onclick="stopAuto()">Stop</button>
+
+<br><br>
 Speed:
-<input type="range" id="speed" min="100" max="1000" value="300">
-</div>
-
-<div class="container">
+<input type="range" id="speed" min="100" max="800" value="300">
 
 <div class="road">
+
 <div id="north" class="lane north"></div>
 <div id="south" class="lane south"></div>
 <div id="east" class="lane east"></div>
 <div id="west" class="lane west"></div>
-<div id="signal" class="signal"></div>
-</div>
 
-<div class="panel">
-<p>🚗 Queue: <span id="queue">0</span></p>
-<p>⏱ Steps: <span id="steps">0</span></p>
-<p>💰 Reward: <span id="reward">0</span></p>
-<p>📊 Avg Wait: <span id="avg">0</span></p>
-<p>🚀 Throughput: <span id="throughput">0</span></p>
-<p>⚡ Latency: <span id="latency">0</span> ms</p>
-</div>
+<div id="signal" class="signal red"></div>
 
 </div>
 
-<div style="text-align:center;margin-top:20px;">
+<br>
+
 <button onclick="manual(0)">↑</button>
 <button onclick="manual(1)">↓</button>
 <button onclick="manual(2)">→</button>
 <button onclick="manual(3)">←</button>
-</div>
 
-<canvas id="chart" class="chart"></canvas>
+<h3>Queue: <span id="queue">0</span></h3>
+<h3>Steps: <span id="steps">0</span></h3>
+<h3>Total Reward: <span id="reward">0</span></h3>
 
 <script>
 
-let steps=0,total=0,loop=null;
+let steps=0,total=0;
+let loop=null;
+let running=false;
 
-let chart=new Chart(document.getElementById("chart"),{
-type:"line",
-data:{labels:[],datasets:[{data:[],borderColor:"#22c55e"}]}
-});
+/* ===== CAR STORAGE ===== */
+let cars = {
+    north: [],
+    south: [],
+    east: [],
+    west: []
+};
 
-function draw(id,count){
-let el=document.getElementById(id);
-el.innerHTML="";
-for(let i=0;i<count;i++){
-let c=document.createElement("div");
-c.className="car";
-el.appendChild(c);
-}
-}
+function spawnCars(obs) {
+    for (let dir of ["north","south","east","west"]) {
+        cars[dir] = [];
+        let count = obs[dir + "_queue"];
 
-function update(obs,r,lat){
-draw("north",obs.north_queue);
-draw("south",obs.south_queue);
-draw("east",obs.east_queue);
-draw("west",obs.west_queue);
+        let lane = document.getElementById(dir);
+        lane.innerHTML = "";
 
-document.getElementById("signal").className="signal green";
+        for (let i=0;i<count;i++){
+            let c = document.createElement("div");
+            c.className="car";
 
-let q=obs.north_queue+obs.south_queue+obs.east_queue+obs.west_queue;
+            if(dir=="north") c.style.top = (i*15)+"px";
+            if(dir=="south") c.style.bottom = (i*15)+"px";
+            if(dir=="east") c.style.right = (i*15)+"px";
+            if(dir=="west") c.style.left = (i*15)+"px";
 
-document.getElementById("queue").innerText=q;
-document.getElementById("steps").innerText=steps;
-document.getElementById("reward").innerText=total.toFixed(2);
-document.getElementById("avg").innerText=(obs.total_waiting/(steps+1)).toFixed(2);
-document.getElementById("throughput").innerText=obs.throughput;
-document.getElementById("latency").innerText=lat;
-
-chart.data.labels.push(steps);
-chart.data.datasets[0].data.push(r);
-chart.update();
+            lane.appendChild(c);
+            cars[dir].push(c);
+        }
+    }
 }
 
+/* ===== ANIMATION ===== */
+function moveCars() {
+    for (let dir in cars) {
+        cars[dir].forEach(c=>{
+            let pos;
+
+            if(dir=="north"){
+                pos=parseInt(c.style.top||0);
+                c.style.top=(pos+2)+"px";
+            }
+            if(dir=="south"){
+                pos=parseInt(c.style.bottom||0);
+                c.style.bottom=(pos+2)+"px";
+            }
+            if(dir=="east"){
+                pos=parseInt(c.style.right||0);
+                c.style.right=(pos+2)+"px";
+            }
+            if(dir=="west"){
+                pos=parseInt(c.style.left||0);
+                c.style.left=(pos+2)+"px";
+            }
+        });
+    }
+}
+
+setInterval(moveCars,50);
+
+
+/* ===== UPDATE ===== */
+function update(obs,reward){
+
+    spawnCars(obs);
+
+    let q = obs.north_queue+obs.south_queue+obs.east_queue+obs.west_queue;
+
+    document.getElementById("queue").innerText=q;
+    document.getElementById("steps").innerText=steps;
+    document.getElementById("reward").innerText=total.toFixed(2);
+
+    document.getElementById("signal").className="signal green";
+}
+
+/* ===== API ===== */
 async function reset(){
-let start=performance.now();
-let res=await fetch("/reset",{method:"POST"});
-let lat=Math.round(performance.now()-start);
-let d=await res.json();
+    let res=await fetch("/reset",{method:"POST"});
+    let d=await res.json();
 
-steps=0; total=0;
-chart.data.labels=[]; chart.data.datasets[0].data=[];
+    steps=0;
+    total=0;
 
-update(d,0,lat);
+    update(d,0);
 }
 
 async function manual(a){
-let start=performance.now();
+    let res=await fetch("/step",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({signal:a})
+    });
 
-let res=await fetch("/step",{
-method:"POST",
-headers:{"Content-Type":"application/json"},
-body:JSON.stringify({signal:a})
-});
+    let d=await res.json();
 
-let lat=Math.round(performance.now()-start);
-let d=await res.json();
+    steps++;
+    total+=d.reward;
 
-steps++; total+=d.reward;
-
-update(d.observation,d.reward,lat);
+    update(d.observation,d.reward);
 }
 
 async function autoStep(){
-let start=performance.now();
-let res=await fetch("/ai-step");
-let lat=Math.round(performance.now()-start);
+    if(!running) return;
 
-let d=await res.json();
+    let res=await fetch("/ai-step");
+    let d=await res.json();
 
-steps++; total+=d.reward;
+    steps++;
+    total+=d.reward;
 
-update(d.observation,d.reward,lat);
+    update(d.observation,d.reward);
 }
 
+/* ===== FIXED AUTO ===== */
 function startAuto(){
-let s=document.getElementById("speed").value;
-loop=setInterval(autoStep,s);
+    if(running) return;
+    running=true;
+
+    function loopRun(){
+        if(!running) return;
+
+        autoStep();
+
+        let speed=document.getElementById("speed").value;
+        setTimeout(loopRun,speed);
+    }
+
+    loopRun();
 }
 
 function stopAuto(){
-clearInterval(loop);
+    running=false;
 }
 
 </script>
