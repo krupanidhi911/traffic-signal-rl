@@ -153,6 +153,10 @@ canvas{width:100%!important;height:130px!important}
 .btn-r{background:#ef4444;color:#fff}
 .btn-d{background:rgba(255,255,255,0.07);border:0.5px solid rgba(255,255,255,0.12);color:#e2e8f0}
 .btn-d.on{background:rgba(245,158,11,0.15);border-color:rgba(245,158,11,0.5);color:#f59e0b}
+.btn-diff{background:rgba(255,255,255,0.07);border:0.5px solid rgba(255,255,255,0.12);color:#94a3b8;flex:1}
+.btn-diff.active-diff{background:rgba(16,185,129,0.15);border-color:rgba(16,185,129,0.5);color:#10b981}
+#diff-medium.active-diff{background:rgba(245,158,11,0.15);border-color:rgba(245,158,11,0.5);color:#f59e0b}
+#diff-hard.active-diff{background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.5);color:#f87171}
 .speed-row{display:flex;align-items:center;gap:8px;margin-top:5px}
 .speed-lbl{font-size:12px;color:#94a3b8;white-space:nowrap}
 input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
@@ -246,6 +250,16 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
           <button class="btn btn-b" onclick="startAuto()">Auto run</button>
           <button class="btn btn-r" onclick="stopAuto()">Stop</button>
         </div>
+      </div>
+
+      <div class="ctrl-section">
+        <div class="ctrl-label">Difficulty</div>
+        <div class="btns">
+          <button class="btn btn-diff active-diff" id="diff-easy" onclick="setDifficulty('easy',42)">Easy</button>
+          <button class="btn btn-diff" id="diff-medium" onclick="setDifficulty('medium',123)">Medium</button>
+          <button class="btn btn-diff" id="diff-hard" onclick="setDifficulty('hard',7)">Hard</button>
+        </div>
+        <div id="diffDesc" style="font-size:11px;color:#64748b;margin-top:6px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px;border:0.5px solid rgba(255,255,255,0.08)">Steady flow — keep average queue low</div>
       </div>
 
       <div class="ctrl-section">
@@ -432,6 +446,20 @@ function stopAuto(){
 function onSpeedChange(v){
   document.getElementById('speedVal').textContent=v+' ms / step';
   if(loop){stopAuto();startAuto();}
+}
+
+const DIFF_DESC={
+  easy:'Steady flow — keep average queue low',
+  medium:'High volume — clear 300+ vehicles, no lane starvation',
+  hard:'Surge recovery — handle a traffic spike at step 50'
+};
+function setDifficulty(level,seed){
+  ['easy','medium','hard'].forEach(d=>{
+    document.getElementById('diff-'+d).classList.remove('active-diff');
+  });
+  document.getElementById('diff-'+level).classList.add('active-diff');
+  document.getElementById('diffDesc').textContent=DIFF_DESC[level];
+  doReset();
 }
 
 doReset();
