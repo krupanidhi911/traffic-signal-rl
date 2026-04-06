@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 import uvicorn
 import torch
@@ -8,18 +8,12 @@ from agent import DQNAgent, obs_to_tensor
 
 app = FastAPI()
 
-# =========================
-# LOAD MODEL
-# =========================
 agent = DQNAgent()
 agent.load("dqn_traffic.pth")
 agent.policy_net.eval()
 
 env = TrafficSignalEnv(seed=42)
 
-# =========================
-# API
-# =========================
 
 @app.post("/reset")
 def reset(level: str = "easy"):
@@ -48,10 +42,6 @@ def ai_step():
     return {"observation": obs.dict(), "reward": reward, "done": done}
 
 
-# =========================
-# UI
-# =========================
-
 @app.get("/", response_class=HTMLResponse)
 def ui():
     return """
@@ -59,127 +49,130 @@ def ui():
 <html>
 <head>
 
-<title>AI Traffic Dashboard</title>
+<title>Real Traffic Simulation</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
-body { background:#0b0f1a; color:white; font-family:Arial; text-align:center; }
+body {
+    background:#0b0f1a;
+    color:white;
+    font-family:Arial;
+    text-align:center;
+}
 
-h1 { margin-top:20px; }
+h1 { margin:20px; }
 
+/* ROAD GRID */
+.road {
+    position:relative;
+    width:300px;
+    height:300px;
+    margin:30px auto;
+}
+
+.lane {
+    position:absolute;
+    display:flex;
+    gap:4px;
+}
+
+/* CAR STYLE */
+.car {
+    width:8px;
+    height:8px;
+    background:#22c55e;
+    border-radius:2px;
+    animation: move 0.5s linear;
+}
+
+@keyframes move {
+    from { transform: translateY(5px); }
+    to { transform: translateY(0); }
+}
+
+/* LANES POSITION */
+.north { top:0; left:140px; flex-direction:column-reverse; }
+.south { bottom:0; left:140px; flex-direction:column; }
+.east  { right:0; top:140px; flex-direction:row; }
+.west  { left:0; top:140px; flex-direction:row-reverse; }
+
+/* SIGNAL */
+.signal {
+    position:absolute;
+    top:130px;
+    left:130px;
+    width:40px;
+    height:40px;
+    border-radius:10px;
+    background:#111827;
+}
+
+.green { background:#22c55e; box-shadow:0 0 15px #22c55e; }
+.red { background:#1f2937; }
+
+/* CONTROLS */
 button {
     padding:10px;
     margin:5px;
     border:none;
     border-radius:8px;
     cursor:pointer;
-    font-size:14px;
 }
-
-.green { background:#22c55e; }
-.blue  { background:#3b82f6; }
-.red   { background:#ef4444; }
-
-.grid {
-    display:grid;
-    grid-template-columns:120px 120px 120px;
-    gap:20px;
-    justify-content:center;
-    margin-top:20px;
-}
-
-.box {
-    padding:20px;
-    border-radius:10px;
-    transition:0.3s;
-}
-
-.signal-green { background:#22c55e; }
-.signal-red { background:#1f2937; }
 
 .chart {
     width:700px;
-    height:300px;
-    margin:20px auto;
-}
-
-.performance {
-    margin-top:20px;
-    padding:15px;
-    background:#111827;
-    border-radius:10px;
-}
-
-#total {
-    color:white;
-    font-size:22px;
-    font-weight:bold;
+    margin:auto;
 }
 </style>
 </head>
 
 <body>
 
-<h1>🚦 AI Traffic Dashboard</h1>
+<h1>🚦 Real Traffic Simulation</h1>
 
 <select id="difficulty">
-    <option value="easy">Easy</option>
-    <option value="medium">Medium</option>
-    <option value="hard">Hard</option>
+<option value="easy">Easy</option>
+<option value="medium">Medium</option>
+<option value="hard">Hard</option>
 </select>
 
 <br>
 
-<button class="green" onclick="reset()">▶ Reset</button>
-<button class="blue" onclick="startAuto()">🤖 Auto</button>
-<button class="red" onclick="stopAuto()">⛔ Stop</button>
+<button onclick="reset()">Reset</button>
+<button onclick="startAuto()">AI Auto</button>
+<button onclick="stopAuto()">Stop</button>
 
 <br>
 
-<div style="margin-top:10px;">
-    Speed:
-    <input type="range" id="speed" min="100" max="1000" value="300">
-    <span id="speedVal">300</span> ms
+Speed:
+<input type="range" id="speed" min="100" max="1000" value="300">
+
+<div class="road">
+
+<div id="north" class="lane north"></div>
+<div id="south" class="lane south"></div>
+<div id="east" class="lane east"></div>
+<div id="west" class="lane west"></div>
+
+<div id="signal" class="signal"></div>
+
 </div>
 
-<!-- INTERSECTION -->
-<div class="grid">
-    <div></div>
-    <div id="north" class="box signal-red">N</div>
-    <div></div>
-
-    <div id="west" class="box signal-red">W</div>
-    <div class="box">🚦</div>
-    <div id="east" class="box signal-red">E</div>
-
-    <div></div>
-    <div id="south" class="box signal-red">S</div>
-    <div></div>
-</div>
-
-<!-- MANUAL -->
 <div>
-    <button onclick="manual(0)">↑</button>
-    <button onclick="manual(1)">↓</button>
-    <button onclick="manual(2)">→</button>
-    <button onclick="manual(3)">←</button>
+<button onclick="manual(0)">↑</button>
+<button onclick="manual(1)">↓</button>
+<button onclick="manual(2)">→</button>
+<button onclick="manual(3)">←</button>
 </div>
 
-<!-- STATS -->
 <div>
-    <p>Queue: <span id="queue">0</span></p>
-    <p>Steps: <span id="steps">0</span></p>
-    <p>Total Reward: <span id="total">0</span></p>
+<p>Queue: <span id="queue">0</span></p>
+<p>Steps: <span id="steps">0</span></p>
+<p>Total Reward: <span id="total">0</span></p>
+<p>Avg Wait: <span id="avg_wait">0</span></p>
+<p>Throughput: <span id="throughput">0</span></p>
 </div>
 
-<!-- PERFORMANCE -->
-<div class="performance">
-    <h3>📊 Performance</h3>
-    <p>Avg Wait: <span id="avg_wait">0</span></p>
-    <p>Throughput: <span id="throughput">0</span></p>
-</div>
-
-<!-- CHART -->
 <canvas id="chart" class="chart"></canvas>
 
 <script>
@@ -191,15 +184,45 @@ let loop;
 
 let chart = new Chart(document.getElementById("chart"), {
     type: "line",
-    data: {
-        labels: [],
-        datasets: [{
-            label: "Reward",
-            data: [],
-            borderColor: "#22c55e"
-        }]
-    }
+    data: { labels: [], datasets: [{ data: [], borderColor:"#22c55e"}]}
 });
+
+function drawCars(id, count) {
+    let lane = document.getElementById(id);
+    lane.innerHTML = "";
+    for (let i = 0; i < count; i++) {
+        let car = document.createElement("div");
+        car.className = "car";
+        lane.appendChild(car);
+    }
+}
+
+function update(obs, reward) {
+
+    drawCars("north", obs.north_queue);
+    drawCars("south", obs.south_queue);
+    drawCars("east", obs.east_queue);
+    drawCars("west", obs.west_queue);
+
+    let map = ["north","south","east","west"];
+    let active = map[obs.current_green];
+
+    document.getElementById("signal").className =
+        "signal " + (active ? "green" : "red");
+
+    let q = obs.north_queue + obs.south_queue + obs.east_queue + obs.west_queue;
+
+    document.getElementById("queue").innerText = q;
+    document.getElementById("steps").innerText = steps;
+    document.getElementById("total").innerText = total.toFixed(2);
+    document.getElementById("avg_wait").innerText =
+        (obs.total_waiting / (steps + 1)).toFixed(2);
+    document.getElementById("throughput").innerText = obs.throughput;
+
+    chart.data.labels.push(steps);
+    chart.data.datasets[0].data.push(reward);
+    chart.update();
+}
 
 async function reset() {
     let level = document.getElementById("difficulty").value;
@@ -208,19 +231,17 @@ async function reset() {
 
     steps = 0;
     total = 0;
-
     chart.data.labels = [];
     chart.data.datasets[0].data = [];
-    chart.update();
 
-    update(data, 0, false);
+    update(data, 0);
 }
 
-async function manual(action) {
+async function manual(a) {
     let res = await fetch("/step", {
         method:"POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({signal: action})
+        body: JSON.stringify({signal:a})
     });
 
     let data = await res.json();
@@ -236,24 +257,13 @@ async function aiStep() {
 function process(data) {
     steps++;
     total += data.reward;
-
-    chart.data.labels.push(steps);
-    chart.data.datasets[0].data.push(data.reward);
-    chart.update();
-
-    update(data.observation, data.reward, data.done);
-
-    if (data.done) stopAuto();
+    update(data.observation, data.reward);
 }
 
 function startAuto() {
     if (running) return;
-
     running = true;
-
     let speed = document.getElementById("speed").value;
-    document.getElementById("speedVal").innerText = speed;
-
     loop = setInterval(aiStep, speed);
 }
 
@@ -262,49 +272,11 @@ function stopAuto() {
     clearInterval(loop);
 }
 
-document.getElementById("speed").oninput = function() {
-    document.getElementById("speedVal").innerText = this.value;
-
-    if (running) {
-        stopAuto();
-        startAuto();
-    }
-};
-
-function update(obs, reward, done) {
-
-    let map = ["north","south","east","west"];
-
-    map.forEach(id => {
-        document.getElementById(id).className = "box signal-red";
-    });
-
-    let active = map[obs.current_green];
-    document.getElementById(active).className = "box signal-green";
-
-    document.getElementById("north").innerText = "N: " + obs.north_queue;
-    document.getElementById("south").innerText = "S: " + obs.south_queue;
-    document.getElementById("east").innerText  = "E: " + obs.east_queue;
-    document.getElementById("west").innerText  = "W: " + obs.west_queue;
-
-    let q = obs.north_queue + obs.south_queue + obs.east_queue + obs.west_queue;
-
-    document.getElementById("queue").innerText = q;
-    document.getElementById("steps").innerText = steps;
-    document.getElementById("total").innerText = total.toFixed(2);
-
-    document.getElementById("avg_wait").innerText =
-        (obs.total_waiting / (steps + 1)).toFixed(2);
-
-    document.getElementById("throughput").innerText = obs.throughput;
-}
-
 </script>
 
 </body>
 </html>
 """
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=7860)
