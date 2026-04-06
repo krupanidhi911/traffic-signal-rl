@@ -5,4 +5,4 @@ openai>=1.14.0
 numpy>=1.24.0
 PyYAML>=6.0
 gradio
-torch==2.0.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
+torch==2.0.1
