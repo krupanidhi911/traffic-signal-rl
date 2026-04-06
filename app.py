@@ -1,47 +1,3 @@
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
-import uvicorn
-import torch
-
-from traffic_env import TrafficSignalEnv, TrafficAction
-from agent import DQNAgent, obs_to_tensor
-
-app = FastAPI()
-
-agent = DQNAgent()
-agent.load("dqn_traffic.pth")
-agent.policy_net.eval()
-
-env = TrafficSignalEnv(seed=42)
-
-
-@app.post("/reset")
-def reset(level: str = "easy"):
-    global env
-    seed_map = {"easy": 1, "medium": 5, "hard": 10}
-    env = TrafficSignalEnv(seed=seed_map.get(level, 1))
-    return env.reset().dict()
-
-
-@app.post("/step")
-def step(action: TrafficAction):
-    obs, reward, done, _ = env.step(action)
-    return {"observation": obs.dict(), "reward": reward, "done": done}
-
-
-@app.get("/ai-step")
-def ai_step():
-    obs = env.state()
-    with torch.no_grad():
-        state = obs_to_tensor(obs).unsqueeze(0).to(agent.device)
-        action_idx = agent.policy_net(state).argmax(dim=1).item()
-
-    action = TrafficAction(signal=action_idx)
-    obs, reward, done, _ = env.step(action)
-
-    return {"observation": obs.dict(), "reward": reward, "done": done}
-
-
 @app.get("/", response_class=HTMLResponse)
 def ui():
     return """
@@ -49,52 +5,86 @@ def ui():
 <html>
 <head>
 
-<title>Real Traffic Simulation</title>
+<title>AI Traffic Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
+
 body {
-    background:#0b0f1a;
+    margin:0;
+    font-family: 'Segoe UI', sans-serif;
+    background: radial-gradient(circle at top, #0f172a, #020617);
     color:white;
-    font-family:Arial;
     text-align:center;
 }
 
-h1 { margin:20px; }
+/* HEADER */
+h1 {
+    font-size: 32px;
+    margin-top: 20px;
+    background: linear-gradient(90deg, #22c55e, #3b82f6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
 
-/* ROAD GRID */
+/* CONTROLS */
+.controls {
+    margin: 15px;
+}
+
+button, select {
+    padding:10px 15px;
+    border-radius:10px;
+    border:none;
+    margin:5px;
+    cursor:pointer;
+    font-weight:bold;
+    transition:0.3s;
+}
+
+button:hover {
+    transform:scale(1.1);
+}
+
+.reset { background:#22c55e; }
+.auto { background:#3b82f6; }
+.stop { background:#ef4444; }
+
+/* DASHBOARD GRID */
+.dashboard {
+    display:flex;
+    justify-content:center;
+    gap:20px;
+    margin-top:20px;
+}
+
+/* ROAD */
 .road {
     position:relative;
     width:300px;
     height:300px;
-    margin:30px auto;
 }
 
+/* LANES */
 .lane {
     position:absolute;
     display:flex;
-    gap:4px;
+    gap:5px;
 }
 
-/* CAR STYLE */
-.car {
-    width:8px;
-    height:8px;
-    background:#22c55e;
-    border-radius:2px;
-    animation: move 0.5s linear;
-}
-
-@keyframes move {
-    from { transform: translateY(5px); }
-    to { transform: translateY(0); }
-}
-
-/* LANES POSITION */
 .north { top:0; left:140px; flex-direction:column-reverse; }
 .south { bottom:0; left:140px; flex-direction:column; }
-.east  { right:0; top:140px; flex-direction:row; }
+.east  { right:0; top:140px; }
 .west  { left:0; top:140px; flex-direction:row-reverse; }
+
+/* CAR */
+.car {
+    width:10px;
+    height:10px;
+    border-radius:3px;
+    background:#22c55e;
+    box-shadow:0 0 8px #22c55e;
+}
 
 /* SIGNAL */
 .signal {
@@ -104,57 +94,79 @@ h1 { margin:20px; }
     width:40px;
     height:40px;
     border-radius:10px;
-    background:#111827;
+    transition:0.3s;
 }
 
-.green { background:#22c55e; box-shadow:0 0 15px #22c55e; }
-.red { background:#1f2937; }
-
-/* CONTROLS */
-button {
-    padding:10px;
-    margin:5px;
-    border:none;
-    border-radius:8px;
-    cursor:pointer;
+.green {
+    background:#22c55e;
+    box-shadow:0 0 20px #22c55e;
 }
 
+.red {
+    background:#ef4444;
+}
+
+/* STATS PANEL */
+.panel {
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(10px);
+    padding:20px;
+    border-radius:15px;
+    width:250px;
+    text-align:left;
+}
+
+.panel p {
+    margin:8px 0;
+}
+
+/* CHART */
 .chart {
     width:700px;
-    margin:auto;
+    margin:30px auto;
 }
+
 </style>
 </head>
 
 <body>
 
-<h1>🚦 Real Traffic Simulation</h1>
+<h1>🚦 AI Traffic Dashboard</h1>
 
+<div class="controls">
 <select id="difficulty">
 <option value="easy">Easy</option>
 <option value="medium">Medium</option>
 <option value="hard">Hard</option>
 </select>
 
-<br>
-
-<button onclick="reset()">Reset</button>
-<button onclick="startAuto()">AI Auto</button>
-<button onclick="stopAuto()">Stop</button>
+<button class="reset" onclick="reset()">Reset</button>
+<button class="auto" onclick="startAuto()">AI Auto</button>
+<button class="stop" onclick="stopAuto()">Stop</button>
 
 <br>
-
 Speed:
 <input type="range" id="speed" min="100" max="1000" value="300">
+</div>
+
+<div class="dashboard">
 
 <div class="road">
-
 <div id="north" class="lane north"></div>
 <div id="south" class="lane south"></div>
 <div id="east" class="lane east"></div>
 <div id="west" class="lane west"></div>
-
 <div id="signal" class="signal"></div>
+</div>
+
+<div class="panel">
+<p>🚗 Queue: <span id="queue">0</span></p>
+<p>⏱ Steps: <span id="steps">0</span></p>
+<p>💰 Reward: <span id="total">0</span></p>
+<p>📊 Avg Wait: <span id="avg">0</span></p>
+<p>🚀 Throughput: <span id="throughput">0</span></p>
+<p>⚡ Latency: <span id="latency">0 ms</span></p>
+</div>
 
 </div>
 
@@ -163,14 +175,6 @@ Speed:
 <button onclick="manual(1)">↓</button>
 <button onclick="manual(2)">→</button>
 <button onclick="manual(3)">←</button>
-</div>
-
-<div>
-<p>Queue: <span id="queue">0</span></p>
-<p>Steps: <span id="steps">0</span></p>
-<p>Total Reward: <span id="total">0</span></p>
-<p>Avg Wait: <span id="avg_wait">0</span></p>
-<p>Throughput: <span id="throughput">0</span></p>
 </div>
 
 <canvas id="chart" class="chart"></canvas>
@@ -197,27 +201,25 @@ function drawCars(id, count) {
     }
 }
 
-function update(obs, reward) {
+function update(obs, reward, latency) {
 
     drawCars("north", obs.north_queue);
     drawCars("south", obs.south_queue);
     drawCars("east", obs.east_queue);
     drawCars("west", obs.west_queue);
 
-    let map = ["north","south","east","west"];
-    let active = map[obs.current_green];
-
     document.getElementById("signal").className =
-        "signal " + (active ? "green" : "red");
+        "signal green";
 
     let q = obs.north_queue + obs.south_queue + obs.east_queue + obs.west_queue;
 
     document.getElementById("queue").innerText = q;
     document.getElementById("steps").innerText = steps;
     document.getElementById("total").innerText = total.toFixed(2);
-    document.getElementById("avg_wait").innerText =
+    document.getElementById("avg").innerText =
         (obs.total_waiting / (steps + 1)).toFixed(2);
     document.getElementById("throughput").innerText = obs.throughput;
+    document.getElementById("latency").innerText = latency + " ms";
 
     chart.data.labels.push(steps);
     chart.data.datasets[0].data.push(reward);
@@ -226,38 +228,55 @@ function update(obs, reward) {
 
 async function reset() {
     let level = document.getElementById("difficulty").value;
+
+    let start = performance.now();
     let res = await fetch("/reset?level=" + level, {method:"POST"});
+    let latency = Math.round(performance.now() - start);
+
     let data = await res.json();
 
     steps = 0;
     total = 0;
+
     chart.data.labels = [];
     chart.data.datasets[0].data = [];
 
-    update(data, 0);
+    update(data, 0, latency);
 }
 
 async function manual(a) {
+
+    let start = performance.now();
+
     let res = await fetch("/step", {
         method:"POST",
         headers: {"Content-Type":"application/json"},
         body: JSON.stringify({signal:a})
     });
 
+    let latency = Math.round(performance.now() - start);
+
     let data = await res.json();
-    process(data);
+
+    steps++;
+    total += data.reward;
+
+    update(data.observation, data.reward, latency);
 }
 
 async function aiStep() {
-    let res = await fetch("/ai-step");
-    let data = await res.json();
-    process(data);
-}
 
-function process(data) {
+    let start = performance.now();
+
+    let res = await fetch("/ai-step");
+    let latency = Math.round(performance.now() - start);
+
+    let data = await res.json();
+
     steps++;
     total += data.reward;
-    update(data.observation, data.reward);
+
+    update(data.observation, data.reward, latency);
 }
 
 function startAuto() {
@@ -277,6 +296,3 @@ function stopAuto() {
 </body>
 </html>
 """
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
