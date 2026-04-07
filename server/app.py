@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from traffic_env import TrafficSignalEnv, TrafficAction
+from app.traffic_env import TrafficSignalEnv, TrafficAction
 
 app = FastAPI()
 _env = TrafficSignalEnv(seed=42)
