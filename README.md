@@ -1,12 +1,12 @@
 ---
-title: Traffic Signal Rl
-emoji: 📉
+---
+title: Traffic Signal RL
+emoji: 🚦
 colorFrom: blue
-colorTo: blue
+colorTo: green
 sdk: docker
-pinned: false
-license: mit
-short_description: A Deep Q-Network (DQN) powered traffic signal control system
+app_port: 7860
+---
 ---
 # 🚦 Smart Traffic Signal Controller (RL)
 
