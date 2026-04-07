@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 import uvicorn
 import random
 
-from traffic_env import TrafficSignalEnv, TrafficAction
+from app.traffic_env import TrafficSignalEnv, TrafficAction
 
 app = FastAPI()
 _env = TrafficSignalEnv(seed=42)
