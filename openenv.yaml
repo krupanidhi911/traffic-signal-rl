@@ -1,6 +1,99 @@
-spec_version: 1
-name: traffic-signal-rl
-type: environment
-runtime: docker
-app: server.app:app
-port: 7860
+name: SmartTrafficSignalController-v1
+version: "1.0.0"
+description: >
+  Control traffic lights at a 4-way junction to minimize vehicle waiting time.
+  A real-world task: adaptive traffic signal control.
+
+task: traffic-signal-control
+category: real-world-simulation
+
+observation_space:
+  type: Dict
+  fields:
+    north_queue:
+      type: int
+      range: [0, 20]
+      description: Vehicles queued in North lane
+    south_queue:
+      type: int
+      range: [0, 20]
+      description: Vehicles queued in South lane
+    east_queue:
+      type: int
+      range: [0, 20]
+      description: Vehicles queued in East lane
+    west_queue:
+      type: int
+      range: [0, 20]
+      description: Vehicles queued in West lane
+    current_green:
+      type: int
+      range: [0, 3]
+      description: "Currently active green signal: 0=N, 1=S, 2=E, 3=W"
+    step_count:
+      type: int
+      range: [0, 200]
+      description: Current step within episode
+    total_waiting:
+      type: int
+      range: [0, 80]
+      description: Sum of all lane queues
+    throughput:
+      type: int
+      range: [0, 600]
+      description: Total vehicles cleared since episode start
+
+action_space:
+  type: Discrete
+  n: 4
+  values:
+    0: "Set North lane green"
+    1: "Set South lane green"
+    2: "Set East lane green"
+    3: "Set West lane green"
+
+reward:
+  range: [-20.0, 3.0]
+  description: >
+    Dense shaped reward per step.
+    Components:
+      - waiting_penalty: -0.1 * total_vehicles_waiting
+      - throughput_bonus: +0.5 * vehicles_cleared_this_step
+      - fairness_penalty: -0.05 * sum(max(0, starvation - 10) per lane)
+      - switch_penalty: -0.1 if signal switched but no cars cleared
+
+episode:
+  max_steps: 200
+  termination: fixed_length
+
+tasks:
+  - id: easy
+    name: Steady Flow Management
+    difficulty: easy
+    seed: 42
+    description: Keep average queue ≤ 5 vehicles over 200 steps.
+    score_range: [0.0, 1.0]
+
+  - id: medium
+    name: High-Volume Throughput
+    difficulty: medium
+    seed: 123
+    description: Clear ≥ 300 vehicles without starving any lane > 30 steps.
+    score_range: [0.0, 1.0]
+
+  - id: hard
+    name: Surge Recovery
+    difficulty: hard
+    seed: 7
+    description: Handle a traffic surge at step 50 and recover queue below 10 within 40 steps.
+    score_range: [0.0, 1.0]
+
+endpoints:
+  reset: POST /reset
+  step:  POST /step
+  state: GET  /state
+
+infra:
+  runtime_limit_minutes: 20
+  memory_gb: 8
+  cpu: 2
