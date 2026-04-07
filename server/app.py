@@ -1,14 +1,13 @@
-"""
-app.py — Smart Traffic Signal Controller
-Vibrant AI Traffic Dashboard with full OpenEnv API
-"""
-
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 import uvicorn
 import random
 
-from app.traffic_env import TrafficSignalEnv, TrafficAction
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
+from traffic_env import TrafficSignalEnv, TrafficAction
 
 app = FastAPI()
 _env = TrafficSignalEnv(seed=42)
