@@ -1,0 +1,8 @@
+[project]
+name = "traffic-signal-rl"
+version = "0.1.0"
+description = "RL Traffic Signal Environment"
+authors = ["Krupanidhi"]
+
+[tool.openenv]
+entry_point = "traffic_env:TrafficSignalEnv"
