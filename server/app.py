@@ -3,11 +3,8 @@ from fastapi.responses import HTMLResponse
 import uvicorn
 import random
 
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from app.traffic_env import TrafficSignalEnv, TrafficAction
+from traffic_env import TrafficSignalEnv, TrafficAction
 
 app = FastAPI()
 _env = TrafficSignalEnv(seed=42)
