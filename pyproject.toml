@@ -3,6 +3,18 @@ name = "traffic-signal-rl"
 version = "0.1.0"
 description = "RL Traffic Signal Environment"
 authors = ["Krupanidhi"]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "numpy",
+    "PyYAML",
+    "torch",
+    "openenv-core>=0.2.0"
+]
+
+[project.scripts]
+server = "app:app"
 
 [tool.openenv]
 entry_point = "traffic_env:TrafficSignalEnv"
