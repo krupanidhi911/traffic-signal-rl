@@ -1,12 +1,10 @@
 ---
----
 title: Traffic Signal RL
 emoji: 🚦
 colorFrom: blue
 colorTo: green
 sdk: docker
 app_port: 7860
----
 ---
 # 🚦 Smart Traffic Signal Controller (RL)
 
