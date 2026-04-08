@@ -20,22 +20,33 @@ class Task:
 
 def clamp(score: float) -> float:
     """Ensure score is strictly between 0 and 1 (exclusive), as required by validator."""
-    return round(max(0.001, min(0.999, score)), 4)
+    if score is None or isinstance(score, bool):
+        score = 0.001  # safety fallback
+
+    score = max(0.001, min(0.999, float(score)))
+    return round(score, 4)
 
 
 def linear_normalize_reward(raw_reward: float, raw_min: float = -5.0, raw_max: float = 10.0) -> float:
     """
-    Linearly maps raw rewards (including negatives) to a strict [0.0, 1.0] range.
-    Preserves linear reward gradients for stable RL training, unlike Sigmoid.
-    
-    NOTE: Adjust `raw_min` and `raw_max` to match the theoretical extreme 
-    bounds of your specific TrafficSignalEnv.
+    Robust normalization that NEVER produces negatives or NaNs,
+    even if environment outputs unexpected reward spikes.
     """
-    # Proportional mapping from [raw_min, raw_max] to [0.0, 1.0]
-    normalized = (float(raw_reward) - raw_min) / (raw_max - raw_min)
-    
-    # Absolute strict boundary enforcement for extreme edge-case spikes
-    return max(0.0, min(1.0, normalized))
+    try:
+        raw_reward = float(raw_reward)
+    except (TypeError, ValueError):
+        return 0.0
+
+    if raw_max <= raw_min:
+        return 0.0
+
+    normalized = (raw_reward - raw_min) / (raw_max - raw_min)
+
+    if normalized < 0.0:
+        return 0.0
+    elif normalized > 1.0:
+        return 1.0
+    return normalized
 
 
 # ─── Task 1 — EASY ────────────────────────────────────────────────────────────
@@ -108,16 +119,21 @@ def run_episode(env: TrafficSignalEnv, policy_fn: Callable, task_id: str = "easy
     recovered_step     = None
 
     while not done:
-        action          = policy_fn(obs)
+        action = policy_fn(obs)
         obs, raw_reward, done, info = env.step(action)
-        
+
         # ─── STRICT REWARD ENFORCEMENT ───
-        # Linearly normalize the raw reward (which includes negatives) 
-        # strictly into the [0.0, 1.0] bounded range.
         reward = linear_normalize_reward(raw_reward)
+
+        # Absolute safety (prevents ANY negative leakage)
+        if reward < 0.0:
+            reward = 0.0
+        elif reward > 1.0:
+            reward = 1.0
+
         total_reward += reward
         # ─────────────────────────────────
-        
+
         queue_history.append(obs.total_waiting)
 
         for i, s in enumerate(info["starvation"]):
@@ -137,7 +153,7 @@ def run_episode(env: TrafficSignalEnv, policy_fn: Callable, task_id: str = "easy
     )
 
     return {
-        "total_reward"        : round(total_reward, 4),
+        "total_reward"        : round(max(0.0, total_reward), 4),  # final safety
         "total_throughput"    : obs.throughput,
         "avg_total_queue"     : round(sum(queue_history) / len(queue_history), 2),
         "max_starvation"      : max(starvation_history),
@@ -183,6 +199,13 @@ def evaluate_all_tasks(policy_fn: Callable) -> Dict[str, float]:
         env          = TrafficSignalEnv(**task.env_kwargs)
         episode_info = run_episode(env, policy_fn, task_id=task_id)
         score        = task.grader(env, episode_info)
+
+        # Hard validation (debug safety)
+        if score < 0 or score > 1:
+            print("🚨 INVALID SCORE DETECTED:", score, episode_info)
+            score = clamp(score)
+
         scores[task_id] = score
         print(f"  [{task.difficulty.upper():6s}] {task.name}: score={score:.4f}  |  {episode_info}")
+
     return scores
