@@ -1,23 +1,23 @@
 """
 inference.py — DQN-based inference for Smart Traffic Signal Controller.
 Root directory. Structured [START]/[STEP]/[END] stdout logs.
+Includes OpenAI LiteLLM proxy ping and strictly [0.0, 1.0] normalized rewards.
 """
 
 import os
 import sys
-import json
 import time
 import traceback
 import torch
-from openai import OpenAI  # ← ADDED
+from openai import OpenAI
 
 from traffic_env import TrafficSignalEnv, TrafficAction
-from tasks import TASKS
+from tasks import TASKS, normalize_reward, clamp
 from agent import DQNAgent, obs_to_tensor
 
 # ─── Mandatory env vars ───────────────────────────────────────────────────────
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://api-inference.huggingface.co/v1")
-API_KEY      = os.environ.get("API_KEY", "")          # ← CHANGED from HF_TOKEN
+API_KEY      = os.environ.get("API_KEY", "")          # Used for OpenAI client proxy
 MODEL_NAME   = os.environ.get("MODEL_NAME", "gpt-4o-mini")
 
 # ─── Load trained DQN model ───────────────────────────────────────────────────
@@ -38,17 +38,20 @@ except Exception as e:
 
 
 # ─── Structured logging (REQUIRED FORMAT) ────────────────────────────────────
+# Validator scans stdout for literal [START] / [STEP] / [END] lines.
+
 def log_start(task_id: str):
     print(f"[START] task={task_id}", flush=True)
 
 def log_step(step: int, reward: float):
+    # reward is already normalized to [0, 1] before calling this
     print(f"[STEP] step={step} reward={round(reward, 4)}", flush=True)
 
 def log_end(task_id: str, score: float, steps: int):
     print(f"[END] task={task_id} score={round(score, 4)} steps={steps}", flush=True)
 
 
-# ─── LiteLLM Proxy Ping (REQUIRED BY VALIDATOR) ──────────────────────────────  ← ADDED
+# ─── LiteLLM Proxy Ping (REQUIRED BY VALIDATOR) ──────────────────────────────
 def ping_llm_proxy():
     """
     Makes a minimal API call through the LiteLLM proxy.
@@ -92,7 +95,8 @@ def dqn_policy(obs):
 
 # ─── Main inference loop ──────────────────────────────────────────────────────
 def run_inference():
-    ping_llm_proxy()   # ← ADDED — must be first line
+    # Must be the first operation to validate connection before running simulations
+    ping_llm_proxy()
 
     all_task_scores = {}
 
@@ -114,11 +118,15 @@ def run_inference():
             log_start(task_id)
 
             while not done:
-                action                       = dqn_policy(obs)
-                next_obs, reward, done, info = env.step(action)
+                action                           = dqn_policy(obs)
+                next_obs, raw_reward, done, info = env.step(action)
 
-                step_count   += 1
+                step_count += 1
+
+                # ── Normalise raw reward → [0, 1] ─────────────────────────
+                reward = normalize_reward(raw_reward)
                 total_reward += reward
+                # ──────────────────────────────────────────────────────────
 
                 queue_history.append(next_obs.total_waiting)
                 for i, s in enumerate(info["starvation"]):
@@ -131,7 +139,9 @@ def run_inference():
                 if surge_detected and recovered_step is None and next_obs.total_waiting < 10:
                     recovered_step = next_obs.step_count
 
+                # reward passed here is already [0, 1] — graph will be clean
                 log_step(step_count, reward)
+
                 obs = next_obs
 
             recovery_steps = (
@@ -139,10 +149,10 @@ def run_inference():
                 if (surge_detected and recovered_step) else 200
             )
             episode_info = {
-                "avg_total_queue"     : round(sum(queue_history) / len(queue_history), 2) if queue_history else 0,
-                "total_throughput"    : obs.throughput,
-                "max_starvation"      : max(starvation_history),
-                "surge_recovery_steps": recovery_steps,
+                "avg_total_queue"      : round(sum(queue_history) / len(queue_history), 2) if queue_history else 0,
+                "total_throughput"     : obs.throughput,
+                "max_starvation"       : max(starvation_history),
+                "surge_recovery_steps" : recovery_steps,
             }
 
             score = task.grader(env, episode_info)
