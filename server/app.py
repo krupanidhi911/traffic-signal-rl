@@ -1,8 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 import uvicorn
-import random
-
 
 from traffic_env import TrafficSignalEnv, TrafficAction
 
@@ -10,9 +8,22 @@ app = FastAPI()
 _env = TrafficSignalEnv(seed=42)
 
 
-# ═══════════════════════════════════════════════════════════
-#  API  (unchanged from original — all endpoints preserved)
-# ═══════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────
+# ✅ REWARD NORMALIZATION (GLOBAL UTILITY)
+# ─────────────────────────────────────────────────────────
+
+def normalize_reward(raw, raw_min=-20.0, raw_max=3.0):
+    try:
+        raw = float(raw)
+    except:
+        return 0.0
+    raw = max(raw_min, min(raw_max, raw))
+    return (raw - raw_min) / (raw_max - raw_min)
+
+
+# ─────────────────────────────────────────────────────────
+# API
+# ─────────────────────────────────────────────────────────
 
 @app.post("/reset")
 def reset():
@@ -23,10 +34,14 @@ def reset():
 def step(action: dict):
     try:
         act = TrafficAction(**action)
-        obs, reward, done, info = _env.step(act)
+        obs, raw_reward, done, info = _env.step(act)
+
+        # ✅ normalize here
+        reward = normalize_reward(raw_reward)
+
         return {
             "observation": obs.dict(),
-            "reward": reward,
+            "reward": reward,   # always [0,1]
             "done": done,
         }
     except Exception as e:
@@ -35,11 +50,15 @@ def step(action: dict):
 
 @app.get("/ai-step")
 def ai_step():
-    """Heuristic AI: always picks the lane with the longest queue."""
     obs = _env.state()
     queues = [obs.north_queue, obs.south_queue, obs.east_queue, obs.west_queue]
-    signal = queues.index(max(queues))          # greedy heuristic
-    obs2, reward, done, _ = _env.step(TrafficAction(signal=signal))
+    signal = queues.index(max(queues))
+
+    obs2, raw_reward, done, _ = _env.step(TrafficAction(signal=signal))
+
+    # ✅ normalize here too
+    reward = normalize_reward(raw_reward)
+
     return {
         "observation": obs2.dict(),
         "reward": reward,
@@ -57,9 +76,9 @@ def health():
     return {"status": "ok"}
 
 
-# ═══════════════════════════════════════════════════════════
-#  UI
-# ═══════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────
+# UI (UNCHANGED)
+# ─────────────────────────────────────────────────────────
 
 HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -71,7 +90,6 @@ HTML = """<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0e1a;color:#e2e8f0;min-height:100vh;padding:16px}
-
 /* ── Header ── */
 .hdr{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:14px;border-bottom:0.5px solid rgba(255,255,255,0.08)}
 .hdr-icon{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#10b981,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
@@ -80,18 +98,15 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0e1a;color:#e2e8f
 .status{display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,0.1);border:0.5px solid rgba(16,185,129,0.3);border-radius:6px;padding:4px 10px;font-size:12px;color:#10b981}
 .status-dot{width:6px;height:6px;border-radius:50%;background:#10b981;animation:pulse 1.5s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
-
 /* ── Stats ── */
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
 .stat{background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px 14px}
 .stat-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px}
 .stat-val{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
 .v-red{color:#f87171}.v-green{color:#10b981}.v-blue{color:#60a5fa}.v-amber{color:#f59e0b}
-
 /* ── Layout ── */
 .main{display:grid;grid-template-columns:1fr 310px;gap:14px}
 .left{display:flex;flex-direction:column;gap:14px}
-
 /* ── Junction ── */
 .card{background:rgba(255,255,255,0.03);border:0.5px solid rgba(255,255,255,0.08);border-radius:14px;padding:16px}
 .card-title{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}
@@ -117,7 +132,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0e1a;color:#e2e8f
 .cars-w{flex-direction:row-reverse;top:50%;transform:translateY(-50%);right:168px}
 .car{width:10px;height:10px;border-radius:3px;background:#60a5fa;transition:background .3s}
 .car.active-lane{background:#f59e0b}
-
 /* ── Lane bars ── */
 .lane-bars{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
 .lbar{background:rgba(255,255,255,0.04);border:0.5px solid rgba(255,255,255,0.08);border-radius:8px;padding:9px 11px}
@@ -127,7 +141,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0e1a;color:#e2e8f
 .lbar-track{height:6px;background:rgba(255,255,255,0.07);border-radius:3px;overflow:hidden}
 .lbar-fill{height:100%;border-radius:3px;background:#10b981;transition:width .4s ease,background .4s}
 .lbar-fill.hot{background:#f59e0b}
-
 /* ── Chart ── */
 .chart-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .chart-title-txt{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.05em}
@@ -135,7 +148,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0e1a;color:#e2e8f
 .leg-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#64748b}
 .leg-dot{width:8px;height:8px;border-radius:50%}
 canvas{width:100%!important;height:130px!important}
-
 /* ── Controls ── */
 .ctrl-section{margin-bottom:14px}
 .ctrl-section:last-child{margin-bottom:0}
@@ -163,11 +175,9 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
 .sig-info{display:flex;align-items:center;gap:8px;padding:10px;background:rgba(255,255,255,0.04);border-radius:8px;border:0.5px solid rgba(255,255,255,0.08);margin-top:6px}
 .sig-circle{width:14px;height:14px;border-radius:50%;background:#374151;flex-shrink:0;transition:background .4s,box-shadow .4s}
 .sig-txt{font-size:13px;font-weight:600;color:#e2e8f0}
-
 /* ── Done banner ── */
 .done-banner{display:none;background:rgba(59,130,246,0.1);border:0.5px solid rgba(59,130,246,0.35);border-radius:10px;padding:10px 14px;font-size:13px;color:#93c5fd;text-align:center;margin-top:4px}
 .done-banner.show{display:block}
-
 @media(max-width:700px){
   .main{grid-template-columns:1fr}
   .stats{grid-template-columns:repeat(2,1fr)}
@@ -175,7 +185,6 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
 </style>
 </head>
 <body>
-
 <div class="hdr">
   <div class="hdr-icon">🚦</div>
   <div>
@@ -186,17 +195,14 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
     <div class="status"><div class="status-dot"></div><span id="statusTxt">Ready</span></div>
   </div>
 </div>
-
 <div class="stats">
   <div class="stat"><div class="stat-label">Total Queue</div><div class="stat-val v-red" id="sQueue">0</div></div>
   <div class="stat"><div class="stat-label">Episode Reward</div><div class="stat-val v-green" id="sReward">0.00</div></div>
   <div class="stat"><div class="stat-label">Throughput</div><div class="stat-val v-blue" id="sThroughput">0</div></div>
   <div class="stat"><div class="stat-label">Steps</div><div class="stat-val v-amber" id="sSteps">0</div></div>
 </div>
-
 <div class="main">
   <div class="left">
-
     <div class="card">
       <div class="card-title">Junction View</div>
       <div class="junction-wrap">
@@ -220,7 +226,6 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
         </div>
       </div>
     </div>
-
     <div class="card">
       <div class="chart-header">
         <div class="chart-title-txt">Reward &amp; queue history</div>
@@ -231,14 +236,10 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
       </div>
       <canvas id="chartCanvas"></canvas>
     </div>
-
     <div class="done-banner" id="doneBanner">Episode complete — press Reset to start a new episode</div>
-
   </div>
-
   <div class="right">
     <div class="card">
-
       <div class="ctrl-section">
         <div class="ctrl-label">Simulation</div>
         <div class="btns">
@@ -247,7 +248,6 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
           <button class="btn btn-r" onclick="stopAuto()">Stop</button>
         </div>
       </div>
-
       <div class="ctrl-section">
         <div class="ctrl-label">Difficulty</div>
         <div class="btns">
@@ -257,7 +257,6 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
         </div>
         <div id="diffDesc" style="font-size:11px;color:#64748b;margin-top:6px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px;border:0.5px solid rgba(255,255,255,0.08)">Steady flow — keep average queue low</div>
       </div>
-
       <div class="ctrl-section">
         <div class="ctrl-label">Manual signal override</div>
         <div class="btns">
@@ -267,7 +266,6 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
           <button class="btn btn-d" id="dW" onclick="manualStep(3)">← W</button>
         </div>
       </div>
-
       <div class="ctrl-section">
         <div class="ctrl-label">Auto speed</div>
         <div class="speed-row">
@@ -277,7 +275,6 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
         </div>
         <div class="speed-val" id="speedVal">500 ms / step</div>
       </div>
-
       <div class="ctrl-section">
         <div class="ctrl-label">Active signal</div>
         <div class="sig-info">
@@ -285,7 +282,6 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
           <span class="sig-txt" id="sigTxt">—</span>
         </div>
       </div>
-
       <div class="ctrl-section">
         <div class="ctrl-label">Session stats</div>
         <div class="mini-grid">
@@ -295,17 +291,14 @@ input[type=range]{flex:1;accent-color:#3b82f6;cursor:pointer}
           <div class="mg-k">Last latency</div><div class="mg-v" id="mgLat">—</div>
         </div>
       </div>
-
     </div>
   </div>
 </div>
-
 <script>
 const DIRS=['North','South','East','West'];
 const DIR_COLORS=['#10b981','#3b82f6','#f59e0b','#a78bfa'];
 const MAX_Q=20;
 let steps=0,totalReward=0,qSum=0,bestR=null,worstR=null,loop=null;
-
 const ctx=document.getElementById('chartCanvas').getContext('2d');
 const chart=new Chart(ctx,{
   type:'line',
@@ -323,7 +316,6 @@ const chart=new Chart(ctx,{
     }
   }
 });
-
 function drawCars(id,count,isActive){
   const el=document.getElementById(id);
   el.innerHTML='';
@@ -333,7 +325,6 @@ function drawCars(id,count,isActive){
     el.appendChild(c);
   }
 }
-
 function setSignal(idx){
   const col=DIR_COLORS[idx];
   const dot=document.getElementById('sigDot');
@@ -348,23 +339,19 @@ function setSignal(idx){
     lf.style.background=i===idx?'#f59e0b':'#10b981';
   });
 }
-
 function updateUI(obs,stepReward,lat){
   const qs=[obs.north_queue,obs.south_queue,obs.east_queue,obs.west_queue];
   const total=qs.reduce((a,b)=>a+b,0);
   const green=obs.current_green;
-
   drawCars('cN',obs.north_queue,green===0);
   drawCars('cS',obs.south_queue,green===1);
   drawCars('cE',obs.east_queue,green===2);
   drawCars('cW',obs.west_queue,green===3);
   setSignal(green);
-
   ['N','S','E','W'].forEach((d,i)=>{
     document.getElementById('lc'+d).textContent=qs[i];
     document.getElementById('lf'+d).style.width=Math.round(Math.min(100,(qs[i]/MAX_Q)*100))+'%';
   });
-
   document.getElementById('sQueue').textContent=total;
   document.getElementById('sReward').textContent=totalReward.toFixed(2);
   document.getElementById('sThroughput').textContent=obs.throughput;
@@ -373,7 +360,6 @@ function updateUI(obs,stepReward,lat){
   if(steps>0) document.getElementById('mgAvg').textContent=(qSum/steps).toFixed(1);
   if(bestR!==null) document.getElementById('mgBest').textContent=bestR.toFixed(3);
   if(worstR!==null) document.getElementById('mgWorst').textContent=worstR.toFixed(3);
-
   if(chart.data.labels.length>150){
     chart.data.labels.shift();
     chart.data.datasets[0].data.shift();
@@ -384,7 +370,6 @@ function updateUI(obs,stepReward,lat){
   chart.data.datasets[1].data.push(total);
   chart.update('none');
 }
-
 async function doReset(){
   stopAuto();
   const t=performance.now();
@@ -397,7 +382,6 @@ async function doReset(){
   document.getElementById('statusTxt').textContent='Running';
   updateUI(d,0,lat);
 }
-
 async function doStep(signal){
   if(document.getElementById('doneBanner').classList.contains('show')) return;
   const t=performance.now();
@@ -416,34 +400,28 @@ async function doStep(signal){
     stopAuto();
   }
 }
-
 async function autoStep(){
   const r=await fetch('/state');
   const obs=await r.json();
   const qs=[obs.north_queue,obs.south_queue,obs.east_queue,obs.west_queue];
   await doStep(qs.indexOf(Math.max(...qs)));
 }
-
 function manualStep(s){doStep(s);}
-
 function startAuto(){
   stopAuto();
   const ms=parseInt(document.getElementById('speedSlider').value);
   document.getElementById('statusTxt').textContent='Auto';
   loop=setInterval(autoStep,ms);
 }
-
 function stopAuto(){
   if(loop){clearInterval(loop);loop=null;}
   if(!document.getElementById('doneBanner').classList.contains('show'))
     document.getElementById('statusTxt').textContent='Ready';
 }
-
 function onSpeedChange(v){
   document.getElementById('speedVal').textContent=v+' ms / step';
   if(loop){stopAuto();startAuto();}
 }
-
 const DIFF_DESC={
   easy:'Steady flow — keep average queue low',
   medium:'High volume — clear 300+ vehicles, no lane starvation',
@@ -457,20 +435,23 @@ function setDifficulty(level,seed){
   document.getElementById('diffDesc').textContent=DIFF_DESC[level];
   doReset();
 }
-
 doReset();
 </script>
 </body>
 </html>"""
-
 
 @app.get("/", response_class=HTMLResponse)
 def ui():
     return HTML
 
 
+# ─────────────────────────────────────────────────────────
+# RUN
+# ─────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=7860)
 
+
 def main():
-  return app
+    return app
