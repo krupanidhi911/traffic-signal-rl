@@ -7,29 +7,6 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Any
 from traffic_env import TrafficSignalEnv, TrafficAction
 
-# ─── ENVIRONMENT WRAPPER ──────────────────────────────────────────────────────
-class NormalizedTrafficEnv(TrafficSignalEnv):
-    """
-    Wraps the base environment to guarantee that every step reward is 
-    strictly bounded and normalized between 0.0 and 1.0. Maps the original 
-    [-0.2, 10.0] scale proportionally to [0.0, 1.0] to preserve RL gradients.
-    """
-    @property
-    def reward_range(self):
-        return (0.0, 1.0)
-        
-    def step(self, action):
-        obs, reward, done, info = super().step(action)
-        
-        # Min-Max Normalization: (value - min) / (max - min)
-        norm_reward = (float(reward) + 0.2) / 10.2
-        
-        # Strictly clamp to handle any floating point drift across hardware
-        norm_reward = max(0.0, min(1.0, norm_reward))
-        
-        return obs, norm_reward, done, info
-# ──────────────────────────────────────────────────────────────────────────────
-
 
 @dataclass
 class Task:
@@ -44,6 +21,21 @@ class Task:
 def clamp(score: float) -> float:
     """Ensure score is strictly between 0 and 1 (exclusive), as required by validator."""
     return round(max(0.001, min(0.999, score)), 4)
+
+
+def linear_normalize_reward(raw_reward: float, raw_min: float = -5.0, raw_max: float = 10.0) -> float:
+    """
+    Linearly maps raw rewards (including negatives) to a strict [0.0, 1.0] range.
+    Preserves linear reward gradients for stable RL training, unlike Sigmoid.
+    
+    NOTE: Adjust `raw_min` and `raw_max` to match the theoretical extreme 
+    bounds of your specific TrafficSignalEnv.
+    """
+    # Proportional mapping from [raw_min, raw_max] to [0.0, 1.0]
+    normalized = (float(raw_reward) - raw_min) / (raw_max - raw_min)
+    
+    # Absolute strict boundary enforcement for extreme edge-case spikes
+    return max(0.0, min(1.0, normalized))
 
 
 # ─── Task 1 — EASY ────────────────────────────────────────────────────────────
@@ -117,16 +109,14 @@ def run_episode(env: TrafficSignalEnv, policy_fn: Callable, task_id: str = "easy
 
     while not done:
         action          = policy_fn(obs)
-        obs, reward, done, info = env.step(action)
+        obs, raw_reward, done, info = env.step(action)
         
-        # Fallback safeguard: If a raw environment is passed directly into this function 
-        # (bypassing our wrapper), we dynamically intercept and normalize the reward.
-        if not isinstance(env, NormalizedTrafficEnv):
-            reward = (float(reward) + 0.2) / 10.2
-            
-        # Absolute strict boundary enforcement to guarantee validation
-        bounded_reward  = max(0.0, min(1.0, float(reward)))
-        total_reward   += bounded_reward
+        # ─── STRICT REWARD ENFORCEMENT ───
+        # Linearly normalize the raw reward (which includes negatives) 
+        # strictly into the [0.0, 1.0] bounded range.
+        reward = linear_normalize_reward(raw_reward)
+        total_reward += reward
+        # ─────────────────────────────────
         
         queue_history.append(obs.total_waiting)
 
@@ -190,8 +180,7 @@ def evaluate_all_tasks(policy_fn: Callable) -> Dict[str, float]:
     """Run all 3 tasks and return scores dict."""
     scores = {}
     for task_id, task in TASKS.items():
-        # Inject the Normalized wrapper instead of the raw environment
-        env          = NormalizedTrafficEnv(**task.env_kwargs)
+        env          = TrafficSignalEnv(**task.env_kwargs)
         episode_info = run_episode(env, policy_fn, task_id=task_id)
         score        = task.grader(env, episode_info)
         scores[task_id] = score
