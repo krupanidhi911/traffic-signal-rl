@@ -1,7 +1,7 @@
 """
 Task definitions for Smart Traffic Signal Controller.
 3 tasks: easy → medium → hard, each with a deterministic programmatic grader.
-All rewards and scores strictly bounded to [0.0, 1.0].
+All rewards and scores strictly bounded to (0.001, 0.999).
 """
 
 from dataclasses import dataclass
@@ -22,34 +22,33 @@ class Task:
 # ─── Shared utility ───────────────────────────────────────────────────────────
 
 def clamp(score: float) -> float:
-    """Clamp any float strictly to [0.0, 1.0]. Safe against None, bool, NaN."""
+    """Clamp strictly to (0,1) — REQUIRED by validator."""
     try:
         score = float(score)
     except (TypeError, ValueError):
-        return 0.0
-    if score != score:   # NaN check
-        return 0.0
-    return round(max(0.0, min(1.0, score)), 4)
+        return 0.001
+
+    if score != score:  # NaN
+        return 0.001
+
+    # 🔥 STRICT bounds (no 0.0 or 1.0 allowed)
+    return round(max(0.001, min(0.999, score)), 4)
 
 
 def normalize_reward(raw: float,
                      raw_min: float = -20.0,
                      raw_max: float = 3.0) -> float:
-    """
-    Map a raw environment reward to [0.0, 1.0].
-    raw_min / raw_max are set to the documented reward_range in openenv.yaml
-    (-20.0 to 3.0).  Any value outside that window is hard-clamped first so
-    spikes or edge cases never escape the [0, 1] corridor.
-    """
     try:
         raw = float(raw)
     except (TypeError, ValueError):
         return 0.0
-    if raw != raw:       # NaN guard
+
+    if raw != raw:
         return 0.0
+
     if raw_max <= raw_min:
         return 0.0
-    # Hard-clamp before normalising so spikes don't produce values > 1 or < 0
+
     raw = max(raw_min, min(raw_max, raw))
     return round((raw - raw_min) / (raw_max - raw_min), 4)
 
@@ -58,12 +57,14 @@ def normalize_reward(raw: float,
 
 def grade_easy(env: TrafficSignalEnv, episode_info: Dict[str, Any]) -> float:
     avg_queue = episode_info.get("avg_total_queue", 20)
+
     if avg_queue <= 5:
         score = 1.0
     elif avg_queue >= 20:
         score = 0.0
     else:
         score = 1.0 - (avg_queue - 5) / 15.0
+
     return clamp(score)
 
 
@@ -116,36 +117,35 @@ def grade_hard(env: TrafficSignalEnv, episode_info: Dict[str, Any]) -> float:
 def run_episode(env: TrafficSignalEnv,
                 policy_fn: Callable,
                 task_id: str = "easy") -> Dict[str, Any]:
-    """
-    Run one full episode.  Every per-step reward is normalised to [0, 1]
-    before being accumulated so total_reward is always non-negative.
-    """
-    obs                = env.reset()
-    done               = False
-    total_reward       = 0.0
-    queue_history      = []
+
+    obs = env.reset()
+    done = False
+
+    total_reward = 0.0
+    queue_history = []
     starvation_history = [0, 0, 0, 0]
-    surge_detected     = False
-    surge_step         = None
-    recovered_step     = None
+
+    surge_detected = False
+    surge_step = None
+    recovered_step = None
 
     while not done:
-        action               = policy_fn(obs)
+        action = policy_fn(obs)
         obs, raw_reward, done, info = env.step(action)
 
-        # ── Normalise raw reward → [0, 1] before accumulating ──────────────
         reward = normalize_reward(raw_reward)
         total_reward += reward
-        # ───────────────────────────────────────────────────────────────────
 
         queue_history.append(obs.total_waiting)
+
         for i, s in enumerate(info["starvation"]):
             starvation_history[i] = max(starvation_history[i], s)
 
         if task_id == "hard" and not surge_detected and obs.step_count >= 50:
             if obs.total_waiting > 15:
                 surge_detected = True
-                surge_step     = obs.step_count
+                surge_step = obs.step_count
+
         if surge_detected and recovered_step is None and obs.total_waiting < 10:
             recovered_step = obs.step_count
 
@@ -155,52 +155,30 @@ def run_episode(env: TrafficSignalEnv,
     )
 
     return {
-        "total_reward"        : clamp(total_reward / max(1, obs.step_count)),  # avg normalised reward per step
-        "total_throughput"    : obs.throughput,
-        "avg_total_queue"     : round(sum(queue_history) / len(queue_history), 2) if queue_history else 0.0,
-        "max_starvation"      : max(starvation_history),
+        "total_reward": clamp(total_reward / max(1, obs.step_count)),
+        "total_throughput": obs.throughput,
+        "avg_total_queue": round(sum(queue_history) / len(queue_history), 2) if queue_history else 0.0,
+        "max_starvation": max(starvation_history),
         "surge_recovery_steps": recovery_steps,
-        "steps"               : obs.step_count,
+        "steps": obs.step_count,
     }
 
 
 # ─── Task Registry ────────────────────────────────────────────────────────────
 
 TASKS = {
-    "easy": Task(
-        id          = "easy",
-        name        = "Steady Flow Management",
-        description = "Manage normal traffic. Keep average queue ≤ 5 vehicles.",
-        difficulty  = "easy",
-        env_kwargs  = {"seed": 42},
-        grader      = grade_easy,
-    ),
-    "medium": Task(
-        id          = "medium",
-        name        = "High-Volume Throughput",
-        description = "Clear ≥ 300 vehicles in 200 steps without starving any lane.",
-        difficulty  = "medium",
-        env_kwargs  = {"seed": 123},
-        grader      = grade_medium,
-    ),
-    "hard": Task(
-        id          = "hard",
-        name        = "Surge Recovery",
-        description = "Handle a traffic surge at step 50 and recover quickly.",
-        difficulty  = "hard",
-        env_kwargs  = {"seed": 7},
-        grader      = grade_hard,
-    ),
+    "easy": Task("easy", "Steady Flow Management", "Manage normal traffic.", "easy", {"seed": 42}, grade_easy),
+    "medium": Task("medium", "High-Volume Throughput", "Clear ≥ 300 vehicles.", "medium", {"seed": 123}, grade_medium),
+    "hard": Task("hard", "Surge Recovery", "Handle traffic surge.", "hard", {"seed": 7}, grade_hard),
 }
 
 
 def evaluate_all_tasks(policy_fn: Callable) -> Dict[str, float]:
-    """Run all 3 tasks and return scores dict. All scores guaranteed [0, 1]."""
     scores = {}
     for task_id, task in TASKS.items():
-        env          = TrafficSignalEnv(**task.env_kwargs)
+        env = TrafficSignalEnv(**task.env_kwargs)
         episode_info = run_episode(env, policy_fn, task_id=task_id)
-        score        = task.grader(env, episode_info)
+        score = task.grader(env, episode_info)
         scores[task_id] = score
-        print(f"  [{task.difficulty.upper():6s}] {task.name}: score={score:.4f}  |  {episode_info}")
+        print(f"[{task.difficulty.upper():6s}] {task.name}: score={score:.4f} | {episode_info}")
     return scores
