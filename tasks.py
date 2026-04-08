@@ -23,6 +23,14 @@ def clamp(score: float) -> float:
     return round(max(0.001, min(0.999, score)), 4)
 
 
+def bound_step_reward(reward: float) -> float:
+    """
+    Ensures every step reward is strictly bounded between 0.0 and 1.0.
+    Clips negative penalties to 0.0 and caps over-performance at 1.0.
+    """
+    return max(0.0, min(1.0, float(reward)))
+
+
 # ─── Task 1 — EASY ────────────────────────────────────────────────────────────
 
 def grade_easy(env: TrafficSignalEnv, episode_info: Dict[str, Any]) -> float:
@@ -95,7 +103,11 @@ def run_episode(env: TrafficSignalEnv, policy_fn: Callable, task_id: str = "easy
     while not done:
         action          = policy_fn(obs)
         obs, reward, done, info = env.step(action)
-        total_reward   += reward
+        
+        # Apply strict [0.0, 1.0] boundary to the step reward
+        bounded_reward = bound_step_reward(reward)
+        total_reward  += bounded_reward
+        
         queue_history.append(obs.total_waiting)
 
         for i, s in enumerate(info["starvation"]):
