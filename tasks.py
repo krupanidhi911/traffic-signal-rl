@@ -3,9 +3,34 @@ Task definitions for Smart Traffic Signal Controller.
 3 tasks: easy → medium → hard, each with a deterministic programmatic grader.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Callable, Dict, Any
 from traffic_env import TrafficSignalEnv, TrafficAction
+
+# ─── STRICT REWARD BOUNDARY (Monkey Patch) ────────────────────────────────────
+# This directly overrides the environment's step function. Now, whether you are 
+# training your model or evaluating it, the environment mathematically CANNOT 
+# return a reward outside [0.0, 1.0].
+
+_original_env_step = TrafficSignalEnv.step
+
+def _bounded_step(self, action):
+    obs, reward, done, info = _original_env_step(self, action)
+    
+    # Strictly enforce the 0.0 to 1.0 boundary.
+    # Note: If clamping negative penalties to exactly 0.0 flattens your 
+    # learning gradient (making the agent blind to "how bad" a traffic jam is), 
+    # you can replace the line below with a Sigmoid squash: 
+    # bounded_reward = 1.0 / (1.0 + math.exp(-reward))
+    
+    bounded_reward = max(0.0, min(1.0, float(reward)))
+    
+    return obs, bounded_reward, done, info
+
+# Apply the patch globally to the environment class
+TrafficSignalEnv.step = _bounded_step
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -21,14 +46,6 @@ class Task:
 def clamp(score: float) -> float:
     """Ensure score is strictly between 0 and 1 (exclusive), as required by validator."""
     return round(max(0.001, min(0.999, score)), 4)
-
-
-def bound_step_reward(reward: float) -> float:
-    """
-    Ensures every step reward is strictly bounded between 0.0 and 1.0.
-    Clips negative penalties to 0.0 and caps over-performance at 1.0.
-    """
-    return max(0.0, min(1.0, float(reward)))
 
 
 # ─── Task 1 — EASY ────────────────────────────────────────────────────────────
@@ -102,12 +119,9 @@ def run_episode(env: TrafficSignalEnv, policy_fn: Callable, task_id: str = "easy
 
     while not done:
         action          = policy_fn(obs)
+        # reward is now guaranteed to be in [0.0, 1.0] due to the monkey patch above
         obs, reward, done, info = env.step(action)
-        
-        # Apply strict [0.0, 1.0] boundary to the step reward
-        bounded_reward = bound_step_reward(reward)
-        total_reward  += bounded_reward
-        
+        total_reward   += reward
         queue_history.append(obs.total_waiting)
 
         for i, s in enumerate(info["starvation"]):
