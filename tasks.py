@@ -3,33 +3,31 @@ Task definitions for Smart Traffic Signal Controller.
 3 tasks: easy → medium → hard, each with a deterministic programmatic grader.
 """
 
-import math
 from dataclasses import dataclass
 from typing import Callable, Dict, Any
 from traffic_env import TrafficSignalEnv, TrafficAction
 
-# ─── STRICT REWARD BOUNDARY (Monkey Patch) ────────────────────────────────────
-# This directly overrides the environment's step function. Now, whether you are 
-# training your model or evaluating it, the environment mathematically CANNOT 
-# return a reward outside [0.0, 1.0].
-
-_original_env_step = TrafficSignalEnv.step
-
-def _bounded_step(self, action):
-    obs, reward, done, info = _original_env_step(self, action)
-    
-    # Strictly enforce the 0.0 to 1.0 boundary.
-    # Note: If clamping negative penalties to exactly 0.0 flattens your 
-    # learning gradient (making the agent blind to "how bad" a traffic jam is), 
-    # you can replace the line below with a Sigmoid squash: 
-    # bounded_reward = 1.0 / (1.0 + math.exp(-reward))
-    
-    bounded_reward = max(0.0, min(1.0, float(reward)))
-    
-    return obs, bounded_reward, done, info
-
-# Apply the patch globally to the environment class
-TrafficSignalEnv.step = _bounded_step
+# ─── ENVIRONMENT WRAPPER ──────────────────────────────────────────────────────
+class NormalizedTrafficEnv(TrafficSignalEnv):
+    """
+    Wraps the base environment to guarantee that every step reward is 
+    strictly bounded and normalized between 0.0 and 1.0. Maps the original 
+    [-0.2, 10.0] scale proportionally to [0.0, 1.0] to preserve RL gradients.
+    """
+    @property
+    def reward_range(self):
+        return (0.0, 1.0)
+        
+    def step(self, action):
+        obs, reward, done, info = super().step(action)
+        
+        # Min-Max Normalization: (value - min) / (max - min)
+        norm_reward = (float(reward) + 0.2) / 10.2
+        
+        # Strictly clamp to handle any floating point drift across hardware
+        norm_reward = max(0.0, min(1.0, norm_reward))
+        
+        return obs, norm_reward, done, info
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -119,9 +117,17 @@ def run_episode(env: TrafficSignalEnv, policy_fn: Callable, task_id: str = "easy
 
     while not done:
         action          = policy_fn(obs)
-        # reward is now guaranteed to be in [0.0, 1.0] due to the monkey patch above
         obs, reward, done, info = env.step(action)
-        total_reward   += reward
+        
+        # Fallback safeguard: If a raw environment is passed directly into this function 
+        # (bypassing our wrapper), we dynamically intercept and normalize the reward.
+        if not isinstance(env, NormalizedTrafficEnv):
+            reward = (float(reward) + 0.2) / 10.2
+            
+        # Absolute strict boundary enforcement to guarantee validation
+        bounded_reward  = max(0.0, min(1.0, float(reward)))
+        total_reward   += bounded_reward
+        
         queue_history.append(obs.total_waiting)
 
         for i, s in enumerate(info["starvation"]):
@@ -184,7 +190,8 @@ def evaluate_all_tasks(policy_fn: Callable) -> Dict[str, float]:
     """Run all 3 tasks and return scores dict."""
     scores = {}
     for task_id, task in TASKS.items():
-        env          = TrafficSignalEnv(**task.env_kwargs)
+        # Inject the Normalized wrapper instead of the raw environment
+        env          = NormalizedTrafficEnv(**task.env_kwargs)
         episode_info = run_episode(env, policy_fn, task_id=task_id)
         score        = task.grader(env, episode_info)
         scores[task_id] = score
