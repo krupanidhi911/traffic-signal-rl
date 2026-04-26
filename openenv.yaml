@@ -1,8 +1,9 @@
-name: SmartTrafficSignalController-MultiAgent-v1
+name: 4-Agent-Cooperative-Traffic-Network
 version: "2.0.0"
 description: >
-  Multi-Agent Cooperative Traffic Signal Control. Two connected intersections must
-  coordinate to prevent arterial gridlock and maximize global throughput.
+  A 2x2 cooperative traffic corridor. 4 independent agents must coordinate 
+  to prevent systemic gridlock using parameter-shared reinforcement learning.
+  This targets the Multi-Agent Interactions theme.
 
 task: multi-agent-traffic-cooperation
 category: real-world-simulation
@@ -10,25 +11,25 @@ category: real-world-simulation
 observation_space:
   type: Dict
   fields:
-    agent_0:
-      type: Dict
-      description: "Observation for West Intersection"
-    agent_1:
-      type: Dict
-      description: "Observation for East Intersection"
+    agent_0: { type: Dict, description: "Observation for Top-Left Agent (J0)" }
+    agent_1: { type: Dict, description: "Observation for Top-Right Agent (J1)" }
+    agent_2: { type: Dict, description: "Observation for Bottom-Left Agent (J2)" }
+    agent_3: { type: Dict, description: "Observation for Bottom-Right Agent (J3)" }
 
 action_space:
   type: Dict
-  description: Maps agent_id to their chosen green signal (0=N, 1=S, 2=E, 3=W).
+  description: Maps agent_id to their chosen green signal (0=North, 1=South, 2=East, 3=West).
   fields:
     agent_0: { type: int, range: [0, 3] }
     agent_1: { type: int, range: [0, 3] }
+    agent_2: { type: int, range: [0, 3] }
+    agent_3: { type: int, range: [0, 3] }
 
 reward:
   range: [0.0, 1.0]
   description: >
     Strictly bounded global cooperative reward. 
-    0.5 base + efficiency bonus - gridlock penalty - starvation penalty.
+    Efficiency bonus minus heavy gridlock and starvation penalties.
 
 episode:
   max_steps: 200
@@ -36,22 +37,25 @@ episode:
 
 tasks:
   - id: easy
-    name: Corridor Flow
+    name: Low Volume Traffic
     difficulty: easy
     seed: 42
+    score_range: [0.0, 1.0]
   - id: medium
     name: Arterial Coordination
     difficulty: medium
     seed: 123
+    score_range: [0.0, 1.0]
   - id: hard
     name: Gridlock Prevention
     difficulty: hard
     seed: 7
+    score_range: [0.0, 1.0]
 
 endpoints:
-  reset: POST /reset
-  step:  POST /step
-  state: GET  /state
+  reset: POST /ma/reset
+  step:  POST /ma/step
+  state: GET  /ma/state
 
 infra:
   runtime_limit_minutes: 20
